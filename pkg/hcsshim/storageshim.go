@@ -18,6 +18,7 @@ const (
 	PROCATTACHFILTER = "AttachStorageFilter"
 	PROCDETACHFILTER = "DetachStorageFilter"
 	PROCINITSANDBOX  = "InitializeStorageSandbox"
+	PROCREMOVEFILE   = "RemoveFileOrReparsePoint"
 )
 
 /* To pass into syscall, we need a struct matching the following:
@@ -113,6 +114,11 @@ func InitializeStorageSandbox(sandboxPath string, parentLayerPaths []string) err
 		defer dll.Release()
 	}
 
+	// Check for error from loadAndFind
+	if err != nil {
+		return err
+	}
+
 	// Call the procedure itself.
 	r1, r2, err = proc.Call(
 		uintptr(unsafe.Pointer(sandboxPathp)),
@@ -122,13 +128,67 @@ func InitializeStorageSandbox(sandboxPath string, parentLayerPaths []string) err
 	// Check the result codes first
 	if r1 != 0 || r2 != 0 {
 		log.Debugln("r1 ", r1)
-		return errors.New(PROCINITSANDBOX + " failed r1/r2 check")
+		// Check for error itself next
+		if err != nil && err.Error() != "The operation completed successfully." {
+			return errors.New(PROCINITSANDBOX + " failed. " + err.Error())
+		} else {
+			return errors.New(PROCINITSANDBOX + " failed r1/r2 check")
+		}
 	}
 
-	// Check for error itself next
+	return nil
+}
+
+func RemoveFileOrReparsePoint(filePath string) error {
+	log.Debugln("hcsshim::RemoveFileOrReparsePoint")
+	log.Debugln("filePath:", filePath)
+
+	var (
+		// Arguments to the call.
+		filePathp *uint16
+
+		// Result values from calling the procedure
+		r1, r2 uintptr
+
+		// The DLL and procedure in the DLL respectively
+		dll  *syscall.DLL
+		proc *syscall.Proc
+
+		// Error tracking
+		err error
+	)
+
+	filePathp, err = syscall.UTF16PtrFromString(filePath)
 	if err != nil {
-		if err.Error() != "The operation completed successfully." {
-			return errors.New(PROCINITSANDBOX + " failed. " + err.Error())
+		log.Debugln("Failed conversion of filePath to pointer ", err)
+		return err
+	}
+
+	// Load the DLL and get the function
+	dll, proc, err = loadAndFind(PROCREMOVEFILE)
+
+	// Release once used if we managed to get a handle to it
+	if dll != nil {
+		defer dll.Release()
+	}
+
+	// Check for error from loadAndFind
+	if err != nil {
+		return err
+	}
+
+	// Call the procedure itself.
+	r1, r2, err = proc.Call(uintptr(unsafe.Pointer(filePathp)))
+
+	// Check the result codes first
+	if r1 != 0 || r2 != 0 {
+		log.Debugln("r1", r1)
+		log.Debugln("r2", r2)
+		// Check for error itself next
+		if err != nil && err.Error() != "The operation completed successfully." {
+			return errors.New(PROCREMOVEFILE + " failed. " + err.Error())
+		} else {
+			return errors.New(PROCREMOVEFILE + " failed r1/r2 check")
 		}
 	}
 
